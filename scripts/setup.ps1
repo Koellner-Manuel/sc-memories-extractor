@@ -98,7 +98,10 @@ if ($Force -or -not (Test-Path (Join-Path $FfmpegDir "ffmpeg.exe"))) {
     Expand-Archive $zip -DestinationPath $tmp -Force
     $bin = (Get-ChildItem $tmp -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1).DirectoryName
     Reset-Dir $FfmpegDir
-    Copy-Item (Join-Path $bin "*.exe") $FfmpegDir -Force
+    # Nur was das Tool braucht - ffplay.exe (Videoplayer, ~100 MB) wird nicht benoetigt
+    foreach ($exe in "ffmpeg.exe", "ffprobe.exe") {
+        Copy-Item (Join-Path $bin $exe) $FfmpegDir -Force
+    }
     Remove-Item -Recurse -Force $tmp
 } else {
     Write-Host "`n[3/3] ffmpeg vorhanden - uebersprungen"
