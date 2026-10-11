@@ -1,5 +1,5 @@
-# shell.ps1 - PowerShell-Fenster mit aktiven portablen Tools (fuer eigene Befehle).
+# shell.ps1 - PowerShell window with the portable tools active (for your own commands).
 . (Join-Path $PSScriptRoot "env.ps1")
 Set-Location $Root
 & (Join-Path $PSScriptRoot "selftest.ps1")
-Write-Host "`nexiftool, ffmpeg, ffprobe und python sind in diesem Fenster verfuegbar."
+Write-Host "`nexiftool, ffmpeg, ffprobe and python are available in this window."

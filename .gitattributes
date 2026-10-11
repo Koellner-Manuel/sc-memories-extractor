@@ -1,5 +1,5 @@
-# Windows-Skripte immer mit CRLF auschecken, egal wie git konfiguriert ist
+# Normalise line endings in the repository, and always check Windows scripts
+# out as CRLF regardless of the local git configuration.
+* text=auto
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
-
-* text=auto

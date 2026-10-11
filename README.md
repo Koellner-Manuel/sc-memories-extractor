@@ -1,398 +1,297 @@
 # sc-extractor
 
-Ziel: alle Memories (>8 GB) verlustfrei vom Snapchat-Server auf eigene Hardware
-holen, mit korrekten Aufnahmedaten und Geokoordinaten, bevor Snapchat alles über
-5 GB löscht.
+Rescue a Snapchat **Memories** export to your own storage — with the original
+capture dates and GPS coordinates written into every file.
 
-**System:** Windows, portabel von einer externen SSD. Alle benötigten Programme
-(Python, exiftool, ffmpeg) liegen im Ordner selbst – auf dem PC wird nichts
-installiert und kein PATH dauerhaft verändert. Der Laufwerksbuchstabe der SSD
-ist egal.
+Runs portable from a USB drive on Windows. Python, exiftool and ffmpeg are
+downloaded into `tools\`; nothing is installed on the PC and `PATH` is only
+changed for the running session. The drive letter does not matter.
 
----
-
-## Wichtig vorab
-
-Snapchat hat den Gratisspeicher auf 5 GB begrenzt und für alles darüber eine
-zeitlich befristete Aufbewahrung zugesagt. Der Zeitpunkt der Löschung wird pro
-Account ausgerollt, es gibt kein verlässliches öffentliches Datum.
-
-Dazu kommen zwei Fristen im Prozess selbst:
-
-| Was | Dauer |
-|---|---|
-| Snapchat erstellt den Export | bis zu 7 Tage |
-| Download-Links im Export sind gültig | 7 Tage |
-
-**Schritt 1 also heute erledigen.** Alles Weitere kann in Ruhe folgen, solange
-der Lauf innerhalb der Linkgültigkeit passiert.
+**Do not use Snapchat's in-app export.** It saves at most 100 memories per run
+and stamps every file with *today's* date, destroying the chronology. Request
+the official "My Data" export instead, as described below.
 
 ---
 
-## Ordnerstruktur
+## Requirements
+
+- Windows, ~30 GB free (ZIPs + extracted + output)
+- NTFS, not exFAT — survives an unplanned disconnect far better
+- Put the folder in the **root** of the drive (`E:\sc-extractor`) to stay
+  clear of the 260-character path limit
+
+---
+
+## Folder layout
 
 ```
-E:\sc-extractor\             ← Laufwerksbuchstabe beliebig
-├─ 0_selftest.cmd            prüft, ob alle Tools auf diesem PC laufen
-├─ 1_setup.cmd               einmalig, braucht Internet: lädt alle Tools nach tools\
-├─ 2_check.cmd               Trockenlauf, schreibt nichts
-├─ 3_run.cmd                 Hauptlauf, sichert nach output\
-├─ shell.cmd                 PowerShell-Fenster mit exiftool/ffmpeg/python im PATH
-├─ app\                      main.py, requirements.txt
-├─ scripts\                  PowerShell-Skripte hinter den .cmd-Dateien
-├─ tools\                    portable Programme (~480 MB, von 1_setup.cmd erzeugt)
-├─ export\                   ← hier den Snapchat-Export entpacken
-└─ output\                   Ergebnis + _verification.csv
+E:\sc-extractor\
+├─ 0_selftest.cmd     check that the portable tools run on this PC
+├─ 1_setup.cmd        one-time, needs internet: downloads tools\ (~480 MB)
+├─ 2_check.cmd        dry run, writes nothing
+├─ 3_run.cmd          main run, saves into output\
+├─ 4_e2etest.cmd      proves the metadata really lands in the files
+├─ shell.cmd          PowerShell with the portable tools on PATH
+├─ app\               main.py, e2etest.py, requirements.txt
+├─ scripts\           PowerShell scripts behind the .cmd files
+├─ tools\             portable binaries (created by 1_setup.cmd)
+├─ export\            ← extract the Snapchat export here
+└─ output\            result + _verification.csv
 ```
 
-Alle `.cmd`-Dateien per Doppelklick starten. Zusätzliche Parameter lassen sich
-anhängen, z.B. in einer Konsole: `3_run.cmd --join-multisnap`.
+Double-click any `.cmd`. Extra arguments are passed through, e.g.
+`3_run.cmd --join-multisnap`.
 
 ---
 
-## Schritt 1 – Export bei Snapchat anfordern
+## Quick start
 
-1. Im Browser `accounts.snapchat.com` öffnen und anmelden.
-2. **My Data** aufrufen.
-3. Folgende Optionen aktivieren:
-   - `Export your Memories`
-   - `Export JSON Files` ← **nicht optional**, hier stehen die Originaldaten
-4. Datumsfilter **nicht** setzen (= gesamter Zeitraum).
-5. E-Mail-Adresse bestätigen, **Submit**.
+### 1. Request the export (do this first — it can take up to 7 days)
 
-> Nicht die In-App-Funktion verwenden. Die exportiert maximal 100 Memories pro
-> Durchgang in die Kamerarolle und schreibt jede Datei mit dem *heutigen* Datum –
-> die gesamte Chronologie wäre zerstört.
+At `accounts.snapchat.com` → **My Data**, enable:
 
-Snapchat meldet sich per E-Mail, sobald der Export bereitsteht.
+- `Export your Memories`
+- `Export JSON Files` — **required**, this is where the real dates live
 
----
+Set no date filter. Submit, then wait for the email.
 
-## Schritt 2 – SSD vorbereiten
+### 2. Download the tools
 
-Parallel zur Wartezeit erledigen.
+Run `1_setup.cmd` once on a PC with internet. It must end with **"Ready."**
+On any other PC, `0_selftest.cmd` is enough — no setup, no internet.
 
-### 2.1 SSD formatieren und Ordner kopieren
+Optional: add the folder to your antivirus exclusions, otherwise every
+gigabyte gets scanned as it is written.
 
-- SSD als **NTFS** formatieren (nicht exFAT). NTFS ist robuster, falls die SSD
-  während eines Schreibvorgangs abgezogen wird.
-- Rund **30 GB frei** einplanen: ZIPs (~8 GB) + entpackt (~8 GB) + Ausgabe
-  (~8 GB) + Overlay- und Joined-Varianten.
-- Den ganzen Ordner `sc-extractor` **direkt in die Wurzel** der SSD kopieren
-  (z.B. `E:\sc-extractor`) – wegen des Windows-Pfadlimits von 260 Zeichen.
+### 3. Extract the export
 
-### 2.2 Tools einmalig herunterladen
-
-Auf einem PC mit Internet `1_setup.cmd` doppelklicken. Das lädt nach `tools\`:
-
-| Tool | Quelle |
-|---|---|
-| Python 3.13 (embeddable) + requests, Pillow, timezonefinder, tzdata | python.org, PyPI |
-| exiftool (aktuelle Version) | exiftool.org / SourceForge |
-| ffmpeg + ffprobe | gyan.dev (release essentials) |
-
-Am Ende läuft automatisch ein Selbsttest, der mit **„Alles bereit.“** enden
-muss. Bereits vorhandene Tools werden bei erneutem Aufruf übersprungen;
-`1_setup.cmd -Force` installiert alles neu.
-
-### 2.3 Auf jedem weiteren PC
-
-Nur `0_selftest.cmd` ausführen. Kein Setup, keine Installation, kein Internet
-nötig.
-
-### 2.4 Defender-Ausnahme (optional, spart Zeit)
-
-Windows-Sicherheit → Viren- & Bedrohungsschutz → Einstellungen verwalten →
-Ausschlüsse → Ordner `E:\sc-extractor` hinzufügen. Sonst wird jede der ~8 GB
-beim Schreiben gescannt. Gilt pro PC.
-
----
-
-## Schritt 3 – Export herunterladen und entpacken
-
-1. Link aus der Snapchat-Mail öffnen, **alle** ZIP-Teile herunterladen.
-   Bei 8 GB splittet Snapchat in mehrere Dateien.
-2. Jedes ZIP mit **7-Zip** in einen eigenen Unterordner von `export\`
-   entpacken – nicht mit dem Explorer, der ist bei mehreren GB langsam und
-   bricht gerne ab.
-
-Zusammenkopieren ist **nicht** nötig: das Tool durchsucht alle Ordner namens
-`memories` unterhalb von `export\`.
+Download **all** ZIP parts and extract each one with **7-Zip** into its own
+subfolder of `export\`. Explorer is slow on multi-GB archives and tends to
+abort.
 
 ```
-E:\sc-extractor\export\
-├─ mydata\
-│  ├─ json\
-│  │  └─ memories_history.json     ← enthält ALLE Einträge, auch aus Folge-ZIPs
+export\
+├─ mydata~<accountid>\
+│  ├─ json\memories_history.json     ← contains ALL entries
 │  └─ memories\
-├─ mydata-1\
+├─ mydata~<accountid>-2\
 │  └─ memories\
-└─ mydata-2\
+└─ mydata~<accountid>-3\
    └─ memories\
 ```
 
-**ZIPs aufheben**, bis der Report am Ende 0 Fehler zeigt.
+Merging is not necessary — every folder named `memories` below `export\` is
+searched. **Keep the ZIPs** until the report shows no errors.
+
+> **Do not touch the file timestamps.** Each file in the ZIP carries the exact
+> capture time of its JSON entry, and newer exports rely on that to match files
+> to entries. 7-Zip and Explorer both preserve it on extraction; some sync and
+> cloud tools overwrite it. Step 4 checks and reports this.
+
+### 4. Dry run
+
+`2_check.cmd` writes nothing and reports what can be matched:
+
+```
+4000 entries in memories_history.json (0 with media ID)
+Time zones: default=300, gps=3600, neighbour=100
+3950 originals and 900 overlays found locally
+File timestamps: usable - 900/900 unique pairs agree (100.0 %)
+Matched: 3950 / 4000 (by ID 0, by timestamp 3950, by date 0, by day+type 0)
+With overlay: 900
+No media in export and no download link: 50 - cannot be saved
+```
+
+Check that the entry count is plausible and that nothing unexpected appears
+under `Local originals with no match`. See *Matching* below for the rest.
+
+### 5. Main run
+
+`3_run.cmd` (equivalent to `--hash`). Add `--join-multisnap` to also stitch
+split recordings together.
+
+Takes roughly half an hour for ~4000 memories; burning video overlays
+dominates. It is resumable — closing the window costs nothing, already-saved
+files are skipped on the next run.
+
+### 6. Verify
+
+`4_e2etest.cmd` copies a handful of files to a temp folder, runs the full
+pipeline on them and checks the result with exiftool and ffprobe against
+values computed straight from the JSON. `export\` and `output\` are untouched.
+It must end with **"End-to-end test passed."**
+
+Then open `output\_verification.csv` and confirm:
+
+- row count matches the entry count from step 4
+- `status` contains no `error`
+- `overlay_status` contains no `error`
+- `precision` is `exact` throughout (see *Matching*)
+- spot-check a trip abroad — does the local time look right?
+- spot-check a video in Explorer → Details → "Media created"
+
+### 7. Back up, then clean up
+
+Three copies, two media, one off-site. Only once that is done should you
+delete memories in the Snapchat app to get under the quota.
+
+> There is no undo. When in doubt, wait a week and review the backup first.
 
 ---
 
-## Schritt 4 – Trockenlauf
+## Matching
 
-`2_check.cmd` doppelklicken. Schreibt nichts, prüft nur, wie viel sich lokal
-zuordnen lässt:
+Each JSON entry has to be paired with its media file. Four strategies, in
+order:
 
-```
-4231 Eintraege in memories_history.json (4231 mit Media-ID)
-Zeitzonen: default=312, gps=3705, nachbar=214
-  haeufigste: Europe/Vienna (3102), Asia/Tokyo (486), ...
-4180 Originale und 622 Overlays lokal gefunden
-Zuordenbar: 4180 / 4231 (per ID 4180, per Datum 0)
-Davon mit Overlay: 622
-Per Download-Link nachzuladen: 51
-```
+| Strategy | `match` | `precision` | When |
+|---|---|---|---|
+| Media ID | `id` | `exact` | older exports carry `mid=` in the download link |
+| File timestamp | `timestamp` | `exact` | newer exports: the file's mtime equals its JSON timestamp, to the second |
+| Unique day | `date` | `exact` | exactly one entry and one file of that type that day |
+| Day + type | `bucket` | `day` | several that day — only the **date** is certain |
 
-Zu prüfen:
+Timestamp matching is only used after it has been validated: on all pairs that
+are forced anyway (one entry, one file that day) the timestamps must agree at
+least 95 %, over at least 20 such pairs. If the output says
+`File timestamps: NOT usable`, they were altered during extraction —
+re-extract with 7-Zip. `--no-mtime-match` disables the strategy entirely.
 
-- Ist die Zahl der Einträge plausibel?
-- Wird der Großteil **per ID** zugeordnet? Die Media-ID steht im Download-Link
-  der JSON (`mid=…`) und als UUID im Dateinamen
-  (`2024-05-01_<UUID>-main.jpg`). Falls **sehr viele** nachgeladen werden
-  müssten, weicht das Namensschema des Exports ab – dann erst die
-  Zuordnungslogik anpassen, statt 8 GB unnötig neu herunterzuladen.
-- Erscheint `Lokale Originale ohne Zuordnung`, liegen Dateien im Export, die
-  keinem JSON-Eintrag zugeordnet werden konnten – ebenfalls ein Hinweis auf ein
-  abweichendes Namensschema.
+Without usable timestamps, days holding several memories of the same type fall
+back to `day` precision: files are paired alphabetically against entries in
+chronological order. Nothing better is possible — the filename holds only a
+date and a random UUID, and the media itself carries no capture time. Then:
 
-Die Zuordnung per Datum greift nur, wenn an einem Tag genau ein Memory und genau
-eine freie Datei übrig sind. Im Zweifel wird lieber heruntergeladen als das
-falsche Foto zugeordnet.
+- **GPS** is only written when all candidates for that day lie within 1 km
+  (`GEO_BUCKET_KM` in `app\main.py`), so travel days get no coordinates rather
+  than wrong ones
+- **`--join-multisnap`** skips those videos — joined in the wrong order they
+  would produce a scrambled recording
+- the `precision` and `gps_spread_km` columns flag every affected row
 
-**Dateien, die weder Bild noch Video sind** (z.B. eine separate Musikdatei),
-meldet der Trockenlauf mit `ACHTUNG: …`:
-
-```
-ACHTUNG: 12 Dateien im Export sind weder Bild noch Video:
-  11x .m4a, 1x .txt  (z.B. 2024-08-01_<UUID>-music.m4a, notiz.txt)
-  11 davon gehoeren per ID zu einem Memory und werden als _extraN mitgesichert.
-  1 ohne Zuordnung - werden NICHT gesichert:
-  1x .txt  (z.B. notiz.txt)
-```
-
-Dateien mit der UUID eines Memorys im Namen werden unverändert als
-`<name>_extra1.<ext>` neben dem Original gesichert. Dateien ohne Zuordnung
-bitte selbst ansehen, bevor der Export gelöscht wird.
+Entries whose media is missing from the export and that have no download link
+are reported as `status = missing`. A re-run cannot fix them.
 
 ---
 
-## Schritt 5 – Hauptlauf
-
-`3_run.cmd` doppelklicken (entspricht `--hash`).
-
-Was dabei passiert:
-
-1. **Zeitzonen bestimmen** – aus den Geokoordinaten per `timezonefinder`
-   (offline). Snaps ohne GPS erben die Zeitzone des zeitlich nächsten Snaps mit
-   GPS, sofern dieser innerhalb von 12 Stunden liegt. Sonst greift `--tz`
-   (Standard `Europe/Vienna`).
-2. **Dateien sammeln** – lokal vorhandene werden byteweise kopiert, der Rest
-   über den Download-Link nachgeladen. Kommt statt einer Datei ein ZIP zurück,
-   enthält es Original + Overlay. Weitere Dateien im ZIP (z.B. Audio) werden
-   als `_extraN` gesichert und überschreiben nie das Original.
-3. **Overlays einbrennen** – zu jedem Memory mit Overlay entsteht zusätzlich
-   eine `_overlay`-Variante. Das Original bleibt unberührt, die Overlay-Quelle
-   wird als `_overlay_src.png` mitgesichert.
-4. **Metadaten schreiben** – in einem einzigen exiftool-Prozess. Bilder bekommen
-   `DateTimeOriginal`, `OffsetTimeOriginal` und GPS, Videos die
-   QuickTime-Äquivalente (in UTC, unabhängig von der Zeitzone des PCs). Danach
-   wird die Datei-mtime gesetzt.
-5. **Report schreiben** – `output\_verification.csv`.
-
-Ergebnisstruktur:
+## Output
 
 ```
 output\
-├─ 2021\2021-08\2021-08-14_21-32-11_3f2a9c1be04d.jpg              Original
-├─ 2021\2021-08\2021-08-14_21-32-11_3f2a9c1be04d_overlay.jpg      mit Overlay
-├─ 2021\2021-08\2021-08-14_21-32-11_3f2a9c1be04d_overlay_src.png  Overlay-Quelle
-├─ 2021\2021-08\2021-08-14_21-32-11_3f2a9c1be04d_extra1.m4a       weitere Datei (falls vorhanden)
+├─ 2021\2021-08\2021-08-14_21-32-11_3f2a9c1be04d.jpg             original
+├─ 2021\2021-08\2021-08-14_21-32-11_3f2a9c1be04d_overlay.jpg     with overlay
+├─ 2021\2021-08\2021-08-14_21-32-11_3f2a9c1be04d_overlay_src.png overlay source
+├─ 2021\2021-08\2021-08-14_21-32-11_3f2a9c1be04d_extra1.m4a      extra file
 ├─ 2022\2022-07\...
 └─ _verification.csv
 ```
 
-Der Name besteht aus der **Ortszeit der Aufnahme** und den ersten 12 Zeichen der
-Media-ID. Ein Snap vom 3. Juli abends UTC in Tokio landet deshalb unter
-`2022-07-04` – dort war es bereits der 4.
+The name is the **local time at the place of capture** plus the first 12
+characters of the media ID. An evening-UTC snap taken in Tokyo therefore files
+under the next day — that is correct.
 
-### Ton und Musik
+**Originals are never re-encoded.** exiftool swaps only the EXIF block (JPEG)
+or the container atoms (MP4); the image and stream data stay bit-identical.
 
-Die Tonspur wird nie verändert: das Original ist eine 1:1-Kopie, und die
-`_overlay.mp4` übernimmt **alle** Tonspuren unverändert (Stream-Copy). Ob mit
-Snapchat-„Sounds“ hinzugefügte Musik im Export enthalten ist – in der Tonspur
-oder als eigene Datei – hängt vom Export ab. Zum Prüfen ein Memory mit
-bekannter Musik in `export\` abspielen und im Trockenlauf auf `ACHTUNG`
-achten.
+**Overlays** (captions, drawings, stickers) produce an *additional*
+`_overlay` file — necessarily re-encoded — while the original stays untouched
+beside it. The transparent source is kept as `_overlay_src.png` so the variant
+can always be regenerated.
 
-### Bei Abbruch / auf einem anderen PC weitermachen
+**Audio is never altered.** `_overlay.mp4` copies all audio streams unchanged.
 
-Einfach `3_run.cmd` erneut starten – auch auf einem anderen PC. Bereits
-gesicherte Dateien werden übersprungen, nur Fehlendes wird nachgeholt:
+### Importing into a photo library
 
-- Halbfertige Dateien eines Abbruchs (`~tmp_…`) werden beim Start entfernt und
-  neu erzeugt. Eine Datei bekommt ihren endgültigen Namen erst, wenn sie
-  vollständig geschrieben ist.
-- Fehlende oder fehlgeschlagene `_overlay`-Varianten werden aus der gesicherten
-  `_overlay_src.png` neu erzeugt.
-
-### Bei vielen Einträgen ohne GPS im selben Urlaub
-
-```powershell
-.\3_run.cmd --tz-window 72
-```
-
-Erhöht das Fenster, in dem ein Snap ohne Koordinaten die Zeitzone eines
-benachbarten Snaps mit Koordinaten übernimmt, von 12 auf 72 Stunden.
-
-Bereits gesicherte Dateien, deren Ortszeit sich dadurch ändert, werden anhand
-der Media-ID wiedererkannt und **umbenannt bzw. verschoben** – es entstehen
-keine Duplikate.
+The written EXIF/QuickTime timestamps and coordinates are read directly by
+photo managers such as Immich or PhotoPrism, which build the timeline and map
+from them. Exclude `**/*_overlay_src.*`, otherwise the transparent overlay
+sources appear as separate images — they carry the same date and GPS as the
+photo they belong to.
 
 ---
 
-## Schritt 6 – Multi-Snaps verbinden
+## Verification report
 
-Längere Aufnahmen hat Snapchat in ~10-Sekunden-Segmente zerlegt. Dieser Lauf
-erzeugt zusätzlich eine durchgehende Datei je Aufnahmesession:
+`output\_verification.csv`, one row per JSON entry.
 
-```powershell
-.\3_run.cmd --join-multisnap
-```
-
-Da die Originale bereits liegen, wird nur analysiert und verbunden.
-
-Erkennungslogik – ein Clip wird nur angehängt, wenn **alle** Bedingungen passen:
-
-| Bedingung | Standardwert |
+| Column | Meaning |
 |---|---|
-| Abstand der Zeitstempel ≈ Dauer des vorigen Clips | ±2,5 s (`--join-tolerance`) |
-| voriger Clip ist ein volles Segment | ≥ 8 s (`--join-min-segment`) |
-| identischer Video-Codec, Auflösung, Pixelformat, Framerate | – |
-| identischer Audio-Codec, Samplerate, Kanalzahl | – |
-
-Das Verbinden läuft per ffmpeg concat mit Stream-Copy, also **ohne
-Neukodierung**. Die `_joined.mp4` erhält Zeitstempel und Geodaten des ersten
-Segments. Alle Einzelsegmente bleiben erhalten.
-
----
-
-## Schritt 7 – Verifizieren
-
-`output\_verification.csv` in Excel öffnen. Spalten:
-
-| Spalte | Bedeutung |
-|---|---|
-| `id` | Kurz-ID im Dateinamen (aus der Media-ID) |
-| `datum_utc` | Zeitstempel wie in der Snapchat-JSON |
-| `datum_lokal` | daraus berechnete Ortszeit inkl. Offset |
-| `zeitzone` / `tz_quelle` | ermittelte Zone, Quelle: `gps` / `nachbar` / `default` |
-| `zuordnung` | `id`, `datum` oder `download` |
-| `status` | `ok` oder `fehler` |
-| `sha256` | Prüfsumme der gesicherten Datei (nach dem Schreiben der Metadaten) |
-| `overlay_status` | `ok`, `fehler`, `pending` oder `-` |
-| `extras` | zusätzlich gesicherte Dateien (`_extraN`), z.B. Audio |
-| `gruppe` / `join_status` | Multi-Snap-Zuordnung, z.B. `G0001 2/3` / `teil` |
-| `hinweis` | `lokal`, `download`, `vorhanden` oder Fehlertext |
-
-Checkliste:
-
-- [ ] Anzahl Zeilen = Anzahl Einträge aus Schritt 4
-- [ ] Spalte `status` enthält **kein** `fehler`
-- [ ] Spalte `overlay_status` enthält kein `fehler`
-- [ ] Einträge mit `zuordnung = datum` stichprobenartig öffnen – passt das Foto?
-- [ ] Stichprobe: eine Auslandsaufnahme öffnen, Uhrzeit gegen die Erinnerung prüfen
-- [ ] Stichprobe: ein Video in Windows-Eigenschaften → Details prüfen
-      („Medium erstellt“ muss die Ortszeit zeigen)
-- [ ] Stichprobe: eine `_joined.mp4` abspielen, Länge plausibel
-- [ ] Einträge mit `tz_quelle = default` durchsehen – dort wurde die
-      Fallback-Zeitzone verwendet
-
-Bei Fehlern: `3_run.cmd` erneut ausführen. Erst wenn hier alles sauber ist,
-weitergehen.
+| `id` | short ID used in the filename |
+| `date_utc` / `date_local` | timestamp as in the JSON / converted local time |
+| `timezone` / `tz_source` | zone and its source: `gps`, `neighbour`, `default` |
+| `match` / `precision` | matching strategy and how exact it is |
+| `status` | `ok`, `error`, or `missing` (no media in the export) |
+| `file` / `bytes` / `sha256` | saved file, size, checksum (with `--hash`) |
+| `overlay_status` / `overlay_file` | `ok`, `error`, `pending`, `-` |
+| `extras` | additional files saved as `_extraN`, e.g. audio |
+| `group` / `join_status` / `joined_file` | multi-snap grouping |
+| `gps` / `gps_written` / `gps_spread_km` | coordinates, whether written, spread |
+| `note` | `local`, `download`, `existing`, or an error message |
 
 ---
 
-## Schritt 8 – Ablegen und sichern
+## Options
 
-Nach der 3-2-1-Regel: drei Kopien, zwei Medien, eine außer Haus.
+Append to `2_check.cmd` / `3_run.cmd`. Export and output folders are set
+automatically.
 
-1. Arbeitskopie auf der SSD (`output\`)
-2. Kopie auf ein zweites Laufwerk
-3. Später auf den geplanten Heimserver (ThinkCentre)
-
-Für den Heimserver bietet sich **Immich** im Docker-Container an: es liest die
-geschriebenen EXIF-Zeitstempel und Geokoordinaten direkt aus und baut daraus
-Timeline und Karte. Der Zugriff vom iPhone läuft über die Immich-App, auf die
-Dateien selbst kommst du per SMB/WebDAV über die Dateien-App.
-
-Tipp: in Immich als Ausschlussmuster `**/*_overlay_src.*` setzen, sonst
-erscheinen die transparenten Overlay-Quellen als eigene Bilder in der Timeline.
-
-Prüfsummen für den späteren Abgleich (mit `--hash` stehen sie bereits im Report):
-
-```powershell
-Get-FileHash -Algorithm SHA256 .\output\2021\2021-08\*.jpg
-```
-
----
-
-## Schritt 9 – Erst jetzt in Snapchat aufräumen
-
-**Nur wenn Schritt 7 komplett abgehakt ist und mindestens zwei Kopien
-existieren.**
-
-In der Snapchat-App unter Memories die gesicherten Inhalte löschen, bis der
-belegte Speicher unter 5 GB liegt.
-
-> Ab hier gibt es kein Zurück. Im Zweifel lieber eine Woche warten und die
-> Sicherung vorher einmal stichprobenartig durchsehen.
-
----
-
-## Parameter-Referenz
-
-An `2_check.cmd` / `3_run.cmd` anhängen. Export- und Zielordner (`export\`,
-`output\`) setzen die Skripte automatisch.
-
-| Parameter | Standard | Wirkung |
+| Option | Default | Effect |
 |---|---|---|
-| `--verify-only` | – | nur prüfen, nichts schreiben (= `2_check.cmd`) |
-| `--hash` | aus | SHA-256 je Original in den Report (in `3_run.cmd` aktiv) |
-| `--workers` | 6 | parallele Downloads |
-| `--tz` | `Europe/Vienna` | Fallback-Zeitzone ohne Geodaten |
-| `--no-geo-tz` | – | Zeitzone nicht aus Koordinaten bestimmen |
-| `--tz-window` | 12 | Stunden für die Zeitzonen-Übernahme vom Nachbarsnap |
-| `--no-overlays` | – | keine `_overlay`-Varianten erzeugen |
-| `--overlay-quality` | 95 | JPEG-Qualität der Overlay-Bilder |
-| `--overlay-crf` | 18 | x264-CRF der Overlay-Videos |
-| `--join-multisnap` | aus | Multi-Snaps zu `_joined.mp4` verbinden |
-| `--join-tolerance` | 2.5 | Sekunden Toleranz bei der Segmenterkennung |
-| `--join-min-segment` | 8.0 | ab wann ein Clip als volles Segment gilt |
+| `--verify-only` | – | check only, write nothing (= `2_check.cmd`) |
+| `--hash` | off | SHA-256 per original in the report (on in `3_run.cmd`) |
+| `--workers` | 6 | parallel downloads |
+| `--tz` | `Europe/Vienna` | fallback zone when there are no coordinates |
+| `--no-geo-tz` | – | do not derive the time zone from coordinates |
+| `--tz-window` | 12 | hours within which a snap without GPS inherits a neighbour's zone |
+| `--no-mtime-match` | – | do not match files by their timestamp |
+| `--no-overlays` | – | do not create `_overlay` variants |
+| `--overlay-quality` | 95 | JPEG quality of overlay images |
+| `--overlay-crf` | 18 | x264 CRF of overlay videos |
+| `--join-multisnap` | off | stitch split recordings into `_joined.mp4` |
+| `--join-tolerance` | 2.5 | seconds of slack in segment detection |
+| `--join-min-segment` | 8.0 | minimum length counting as a full segment |
+
+Time zones come from the coordinates offline via `timezonefinder`. A snap
+without GPS inherits the zone of the nearest snap with GPS within `--tz-window`
+hours; otherwise `--tz` applies. Changing `--tz` or `--tz-window` on a re-run
+**renames and moves** already-saved files rather than duplicating them.
+
+### Multi-snap
+
+Longer recordings are split by Snapchat into ~10-second segments.
+`--join-multisnap` additionally produces one continuous file per session. A
+clip is only appended when the timestamp gap matches the previous clip's
+duration (±`--join-tolerance`), the previous clip was a full segment, and
+codec, resolution, pixel format, frame rate and audio parameters are identical.
+Joining is a stream copy — no re-encoding. All individual segments are kept.
 
 ---
 
-## Problembehandlung
+## Troubleshooting
 
-| Symptom | Ursache / Lösung |
+| Symptom | Cause / fix |
 |---|---|
-| `Portables Python fehlt` | `1_setup.cmd` noch nicht ausgeführt |
-| Selbsttest zeigt `[FEHLER]` | `1_setup.cmd -Force` auf einem PC mit Internet |
-| `.cmd` öffnet sich und schließt sofort | aus einer Konsole starten, um die Meldung zu sehen |
-| `Keine memories_history.json` | Export nicht unter `export\` entpackt, oder ohne „Export JSON Files“ angefordert |
-| Viele `fehler` mit HTTP 429 | zu viele parallele Downloads → `3_run.cmd --workers 3` |
-| Downloads scheitern alle | Links älter als 7 Tage → neuen Export anfordern |
-| Video-Overlays werden übersprungen | ffmpeg fehlt → Selbsttest prüfen |
-| exiftool meldet Fehler bei Umlauten im Pfad | SSD-Ordner ohne Sonderzeichen benennen |
-| Pfad zu lang | Ordner direkt in die Wurzel der SSD legen |
-| `ACHTUNG: … weder Bild noch Video` | siehe Schritt 4 – zugeordnete werden mitgesichert, den Rest selbst prüfen |
-| Musik fehlt im Video | im Export prüfen (Schritt 5, „Ton und Musik“) – das Tool entfernt keinen Ton |
-| Sehr viele Snaps mit `tz_quelle = default` | Snapchat hat wenig GPS gespeichert → `--tz-window` erhöhen |
-| Einzelsnaps wurden fälschlich verbunden | `--join-tolerance 1.5` |
-| Zusammengehörige Segmente blieben getrennt | `--join-tolerance 4` |
+| `Portable Python is missing` | `1_setup.cmd` has not been run |
+| Self-test shows `[FAIL]` | run `1_setup.cmd -Force` on a PC with internet |
+| `.cmd` window closes instantly | start it from a console to read the message |
+| `No memories_history.json` | not extracted into `export\`, or requested without "Export JSON Files" |
+| `File timestamps: NOT usable` | timestamps altered during extraction → re-extract with 7-Zip |
+| Many rows with `precision = day` | same cause; without usable timestamps only the date is certain |
+| Many rows with `status = missing` | media not included in the export, no download link — not fixable |
+| `gps_written = no` despite coordinates | day-precision match with widely scattered candidates; threshold `GEO_BUCKET_KM` |
+| `--join-multisnap` joins nothing | all candidates matched day-precision only |
+| Many errors with HTTP 429 | too many parallel downloads → `3_run.cmd --workers 3` |
+| All downloads fail | links older than 7 days → request a new export |
+| Video overlays skipped | ffmpeg missing → run the self-test |
+| exiftool errors on umlauts in the path | use a folder name without special characters |
+| Path too long | put the folder in the root of the drive |
+| `WARNING: … neither image nor video` | files matched by ID are saved as `_extraN`; check the rest yourself |
+
+---
+
+## License
+
+MIT - see [LICENSE](LICENSE).
+
+`1_setup.cmd` downloads Python, exiftool and ffmpeg at runtime; they are not
+redistributed here and carry their own licences.

@@ -1,14 +1,14 @@
-# Persoenliche Daten - niemals hochladen
-# (Snapchat-Export mit Download-Links und alle gesicherten Memories)
+# Personal data - never upload
+# (the Snapchat export with its download links, and every saved memory)
 export/*
 !export/.gitkeep
 output/*
 !output/.gitkeep
 
-# Portable Tools - werden von 1_setup.cmd heruntergeladen (~480 MB)
+# Portable tools - downloaded by 1_setup.cmd (~480 MB)
 tools/
 
-# Reste abgebrochener Laeufe
+# Leftovers of aborted runs
 ~tmp_*
 *_exiftool_tmp
 
@@ -18,9 +18,10 @@ __pycache__/
 .venv/
 venv/
 
-# Editor / Betriebssystem
+# Editors, OS, tooling
 .vscode/
 .idea/
+.claude/
 Thumbs.db
 desktop.ini
 .DS_Store
